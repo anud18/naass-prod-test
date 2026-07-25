@@ -1412,8 +1412,14 @@ class ApplicationService:
             stmt = select(ScholarshipType).where(ScholarshipType.code == scholarship_type)
             result = await self.db.execute(stmt)
             scholarship = result.scalar_one_or_none()
-            if scholarship:
-                query = query.where(Application.scholarship_type_id == scholarship.id)
+            if not scholarship:
+                # Fail closed. Previously an unrecognised code left the predicate
+                # off entirely, so a garbage filter value returned *everything* the
+                # caller may see rather than nothing — and because the parameter
+                # then never changed the result set, ZAP's boolean-comparison probe
+                # read that as a SQL-injection signal (issue #1225).
+                return []
+            query = query.where(Application.scholarship_type_id == scholarship.id)
 
         # Apply pagination
         query = query.offset(skip).limit(limit)

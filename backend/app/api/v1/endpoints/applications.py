@@ -340,6 +340,13 @@ async def get_application(
     service = ApplicationService(db)
     result = await service.get_application_by_id(id, current_user)
 
+    # `get_application_by_id` returns None when the row does not exist or the
+    # caller may not see it. Falling through passed None to _serialize_result,
+    # which raised TypeError -> 500 instead of 404 (issue #1225). Returning the
+    # same 404 in both cases also avoids confirming that a hidden id exists.
+    if result is None:
+        raise NotFoundError(f"Application {id} not found")
+
     # Log audit trail for viewing application
     audit_service = ApplicationAuditService(db)
     await audit_service.log_view_application(
