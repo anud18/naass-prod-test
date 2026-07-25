@@ -455,6 +455,10 @@ async def list_payment_rosters(
     取得造冊清單
     Get payment roster list
     """
+    # SECURITY: roster rows embed recipient 身分證字號 and 郵局帳號. Every mutating
+    # handler in this router already role-checks; the read/export handlers did not,
+    # so any authenticated user (including a student) could read every roster.
+    check_user_roles([UserRole.admin, UserRole.super_admin], current_user)
     from app.models.scholarship import ScholarshipConfiguration
 
     try:
@@ -1284,6 +1288,7 @@ async def get_payment_roster(
     取得特定造冊詳細資訊
     Get specific payment roster details
     """
+    check_user_roles([UserRole.admin, UserRole.super_admin], current_user)
     try:
         # 使用 eager loading 避免 MissingGreenlet 錯誤
         stmt = (
@@ -1334,6 +1339,7 @@ async def get_roster_items(
     取得造冊明細項目
     Get roster items
     """
+    check_user_roles([UserRole.admin, UserRole.super_admin], current_user)
     try:
         # 檢查造冊是否存在
         roster_stmt = select(PaymentRoster).where(PaymentRoster.id == roster_id)
@@ -1494,6 +1500,7 @@ def preview_roster_export(
     預覽造冊Excel匯出內容
     Preview roster Excel export content
     """
+    check_user_roles([UserRole.admin, UserRole.super_admin], current_user)
     try:
         roster = db.query(PaymentRoster).filter(PaymentRoster.id == roster_id).first()
 
@@ -1596,6 +1603,7 @@ def export_roster_to_excel(
     匯出造冊至Excel (STD_UP_MIXLISTA格式)
     Export roster to Excel (STD_UP_MIXLISTA format)
     """
+    check_user_roles([UserRole.admin, UserRole.super_admin], current_user)
     try:
         roster = db.query(PaymentRoster).filter(PaymentRoster.id == roster_id).first()
 
@@ -1688,6 +1696,7 @@ async def download_roster_excel(
     下載造冊Excel檔案 (支援MinIO和本地檔案)
     Download roster Excel file (supports MinIO and local files)
     """
+    check_user_roles([UserRole.admin, UserRole.super_admin], current_user)
     # trace_id is injected by add_trace_id_middleware (see backend/app/main.py).
     # We thread it into every download-path log line so the e2e diagnose helper
     # (frontend/e2e/helpers/logs.ts) can correlate failures via grep — without
@@ -1861,6 +1870,7 @@ async def get_roster_statistics(
     取得造冊統計資訊
     Get roster statistics
     """
+    check_user_roles([UserRole.admin, UserRole.super_admin], current_user)
     try:
         stmt = select(PaymentRoster).where(PaymentRoster.id == roster_id)
 
@@ -2131,6 +2141,7 @@ async def get_roster_audit_logs(
     取得造冊稽核日誌
     Get roster audit logs
     """
+    check_user_roles([UserRole.admin, UserRole.super_admin], current_user)
     try:
         stmt = select(PaymentRoster).where(PaymentRoster.id == roster_id)
 

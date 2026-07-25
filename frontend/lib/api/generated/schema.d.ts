@@ -104,7 +104,16 @@ export interface paths {
         put?: never;
         /**
          * Register
-         * @description Register a new user
+         * @description Create a user account. Admin-only — `UserCreate.role` is caller-supplied.
+         *
+         *     SECURITY: this endpoint used to be anonymous while `UserCreate` accepts a
+         *     `role` field, so anyone could POST {"nycu_id": <their own id>, "role":
+         *     "super_admin"} to plant a privileged row. That row survives a *legitimate*
+         *     Portal SSO login, because `_find_or_create_user` deliberately preserves
+         *     pre-authorized super_admin/admin/college roles
+         *     (portal_sso_service.py:285-290) — turning self-registration into a full
+         *     privilege escalation. Account creation must therefore stay behind the same
+         *     role-assignment permission as POST /pre-authorize/user.
          */
         post: operations["register_api_v1_auth_register_post"];
         delete?: never;
@@ -124,7 +133,16 @@ export interface paths {
         put?: never;
         /**
          * Login
-         * @description Login user and return access token
+         * @description Development-only login: exchanges a known nycu_id/email for a token.
+         *
+         *     SECURITY: `AuthService.authenticate_user` performs NO credential check —
+         *     `UserLogin` carries only `username`, and the User model has no password
+         *     column at all (real authentication is NYCU Portal SSO). Left ungated, a
+         *     single anonymous POST with a guessable identifier such as
+         *     "admin@nycu.edu.tw" mints a valid admin JWT. It is therefore hard-gated
+         *     behind `enable_mock_sso`, exactly like /mock-sso/login and /dev-profiles/*
+         *     below, so it 404s wherever ENABLE_MOCK_SSO=false (production and staging)
+         *     while dev/E2E/pytest keep working.
          */
         post: operations["login_api_v1_auth_login_post"];
         delete?: never;
@@ -8439,11 +8457,6 @@ export interface components {
             scholarship_subtype_list?: string[] | null;
             /** @description 表單資料 */
             form_data?: components["schemas"]["ApplicationFormData"] | null;
-            /**
-             * Status
-             * @description 申請狀態
-             */
-            status?: string | null;
             /**
              * Agree Terms
              * @description 同意條款

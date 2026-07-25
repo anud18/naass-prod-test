@@ -1038,9 +1038,7 @@ class ApplicationService:
             # Serialize form data to handle datetime objects properly
             application.submitted_form_data = self._serialize_for_json(update_data.form_data.dict())
 
-        # 更新狀態
-        if update_data.status:
-            application.status = update_data.status
+        # NOTE: status is intentionally not updatable here — see ApplicationUpdate.
 
         # 更新續領申請標識
         if update_data.is_renewal is not None:
@@ -1062,8 +1060,6 @@ class ApplicationService:
 
         await self.db.commit()
         await self.db.refresh(application)
-        if update_data.status:
-            await self._invalidate_app_caches()
 
         # Clone bank account proof document when saving draft or updating application
         # This ensures the document is available in the application
