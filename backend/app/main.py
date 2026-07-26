@@ -352,12 +352,15 @@ async def get_pool_status(current_user: User = Depends(require_admin)):
 @app.get("/")
 async def root():
     """Root endpoint with API information"""
+    # Read the URLs back off the app rather than repeating the literals: they are
+    # None whenever the docs are disabled (production — see _expose_api_docs), and
+    # advertising a link that 404s is worse than not advertising it at all.
     return {
         "success": True,
         "message": f"Welcome to {settings.app_name}",
         "version": settings.app_version,
-        "docs_url": "/api/v1/docs",
-        "redoc_url": "/api/v1/redoc",
+        **({"docs_url": app.docs_url} if app.docs_url else {}),
+        **({"redoc_url": app.redoc_url} if app.redoc_url else {}),
     }
 
 
