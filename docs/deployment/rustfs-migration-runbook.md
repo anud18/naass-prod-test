@@ -128,6 +128,39 @@ Also note: the minio SDK rejects **non-ASCII metadata client-side**
 - [ ] **Key audit**: scan for problematic object keys before mirroring —
       `mc ls --recursive live/<bucket> | grep -P '[^\x20-\x7e]'` (non-ASCII)
       — rehearsal proved spaces/`+` survive, but eyeball anything exotic.
+      Real environments DO have non-ASCII keys (Chinese upload filenames): the
+      staging rehearsal found ~60. Verified on staging 2026-07-26 that key,
+      ETag, size and Content-Type round-trip byte-identical, so the migration
+      script's gate is eyeball-then-acknowledge — pass `ALLOW_NON_ASCII_KEYS=1`
+      once the sample looks like ordinary filenames rather than mojibake.
+- [ ] **Offline image load**: the DB hosts have no container-registry egress
+      (by design — private subnet). `docker pull` there dies on a DNS timeout,
+      so the migration script refuses to start unless both images are already
+      local. Side-load from a host that does have egress (e.g. the AP VM):
+      ```bash
+      docker pull rustfs/rustfs:1.0.0-beta.8 minio/mc:RELEASE.2025-08-13T08-35-41Z
+      docker save rustfs/rustfs:1.0.0-beta.8 minio/mc:RELEASE.2025-08-13T08-35-41Z \
+        | gzip -1 > /tmp/rustfs-mc.tar.gz
+      scp /tmp/rustfs-mc.tar.gz <db-host>:/tmp/
+      ssh <db-host> 'gunzip -c /tmp/rustfs-mc.tar.gz | docker load && rm -f /tmp/rustfs-mc.tar.gz'
+      ```
+      Same applies to any backend image you want to run compat checks with
+      on the DB host itself.
+- [ ] **Compose project-name audit** — the highest-blast-radius precondition.
+      The project name prefixes every volume (`<project>_postgres_staging_data`),
+      so bringing the stack up under a different project than the one that
+      created it binds **postgres to a brand-new empty volume**. Do not assume
+      it matches the directory the compose file currently lives in; read it off
+      the live container:
+      ```bash
+      docker inspect <live-minio-container> \
+        -f '{{index .Config.Labels "com.docker.compose.project"}} {{index .Config.Labels "com.docker.compose.project.config_files"}}'
+      ```
+      If that path is not the repo's `docker-compose.<env>-db.yml`, the live
+      stack is running from a stale checkout and the file the deploy workflow
+      ships has never actually been applied — reconcile that BEFORE cutover
+      (see "Cutover order" step 3). Pass the live project explicitly with
+      `docker compose -p <project>`.
 
 ## Data migration (per environment; staging-db first)
 
@@ -205,7 +238,18 @@ it over as part of cutover step 3.
 2. Final delta: re-run `scripts/migrate_storage_to_rustfs.sh` (`mc mirror` is
    incremental; script fails if `mc diff` is non-empty)
 3. Copy the RustFS `docker-compose.<env>-db.yml` to the VM (no workflow syncs
-   it anymore) and `docker compose up -d` storage + backend
+   it anymore) and bring up ONLY the storage service, under the live project
+   name from the precondition audit:
+   ```bash
+   docker compose -p <live-project> --env-file <env-file> \
+     -f docker-compose.<env>-db.yml up -d minio
+   ```
+   `up -d minio` (not a bare `up -d`) keeps postgres out of the blast radius.
+   The repo's compose file declares its credentials as required
+   (`${VAR:?...}`) and carries no defaults, so the VM needs a root-owned
+   `chmod 600` env-file holding the values the live stack is already using —
+   read them off the running container (`docker inspect`), never invent new
+   ones, and never commit the file. Then start the backend.
 4. `docker exec <backend> python -m app.scripts.storage_compat_check` → 14/14
 5. Smoke e2e (staging: the storage-touching @nightly subset; or manual
    upload→preview→roster-download spot check)

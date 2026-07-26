@@ -39,6 +39,17 @@
 #   ALLOW_EXTRA_BUCKETS=1   proceed even if the live side has buckets beyond
 #                    MINIO_BUCKET/ROSTER_BUCKET (they will NOT be mirrored —
 #                    the runbook's bucket-inventory precondition)
+#   ALLOW_NON_ASCII_KEYS=1  proceed past the non-ASCII object-key audit after
+#                    eyeballing the sample it prints. Real deployments DO carry
+#                    non-ASCII keys (Chinese upload filenames), so this gate is
+#                    an eyeball-then-acknowledge step, not a stop sign —
+#                    verified end-to-end on staging 2026-07-26: key, ETag, size
+#                    and Content-Type all round-trip byte-identical through
+#                    `mc mirror --preserve` into RustFS.
+#
+# The DB hosts have NO container-registry egress by design. This script never
+# pulls: it verifies RUSTFS_IMAGE and MC_IMAGE are already present and tells
+# you how to side-load them if not (see the runbook's "Offline image load").
 # =============================================================================
 set -euo pipefail
 
@@ -62,6 +73,19 @@ die() { echo "[migrate-rustfs] ERROR: $*" >&2; exit 1; }
 
 docker network inspect "$NETWORK" > /dev/null 2>&1 \
   || die "docker network '$NETWORK' not found (prod: set NETWORK=scholarship_prod_db_network)"
+
+# --- 0. Offline image preflight --------------------------------------------
+# The DB hosts sit on a private subnet with no route to a container registry,
+# so a `docker run` that has to pull dies mid-migration with a DNS timeout.
+# Fail fast here instead, with the side-load recipe.
+for img in "$RUSTFS_IMAGE" "$MC_IMAGE"; do
+  docker image inspect "$img" > /dev/null 2>&1 || die "image '$img' is not present locally and this host cannot pull it.
+Side-load it from a host that has registry egress (e.g. the AP VM):
+  docker pull $img
+  docker save $img | gzip -1 > img.tar.gz
+  scp img.tar.gz <db-host>:/tmp/
+  ssh <db-host> 'gunzip -c /tmp/img.tar.gz | docker load && rm -f /tmp/img.tar.gz'"
+done
 
 # Always remove the temporary RustFS container on exit — success, die, or any
 # set -e failure — so an aborted run can't leave a stray storage container
@@ -149,10 +173,19 @@ log "Non-ASCII object-key audit (runbook precondition; empty is good):"
 KEY_LISTING=$(run_mc "mc ls --recursive old/$MINIO_BUCKET old/$ROSTER_BUCKET")
 NON_ASCII_KEYS=$(echo "$KEY_LISTING" | LC_ALL=C grep '[^ -~]' || true)
 if [ -n "$NON_ASCII_KEYS" ]; then
-  echo "$NON_ASCII_KEYS"
-  die "non-ASCII object keys found above — eyeball them before mirroring"
+  # Print a bounded sample: a real environment has dozens of Chinese upload
+  # filenames and dumping all of them buries the count the operator needs.
+  echo "$NON_ASCII_KEYS" | head -10
+  NON_ASCII_COUNT=$(echo "$NON_ASCII_KEYS" | wc -l | tr -d ' ')
+  log "  $NON_ASCII_COUNT non-ASCII key(s) (sample above, capped at 10)"
+  if [ "${ALLOW_NON_ASCII_KEYS:-0}" != "1" ]; then
+    die "non-ASCII object keys found — eyeball the sample above, then re-run with ALLOW_NON_ASCII_KEYS=1 to acknowledge them.
+mc --preserve carries UTF-8 keys and metadata through to RustFS unchanged; this gate exists to catch keys that are mojibake or control characters, not ordinary Chinese filenames."
+  fi
+  log "  acknowledged via ALLOW_NON_ASCII_KEYS=1"
+else
+  log "  none found"
 fi
-log "  none found"
 
 log "Mirroring old/$MINIO_BUCKET and old/$ROSTER_BUCKET → RustFS (incremental)"
 run_mc "
@@ -193,10 +226,19 @@ run_mc "mc du old/$MINIO_BUCKET; mc du new/$MINIO_BUCKET; mc du old/$ROSTER_BUCK
 
 # --- 4. Done; the EXIT trap removes the temp container, data stays in
 #        RUSTFS_DATA_DIR ------------------------------------------------------
+# The compose project name prefixes every volume name. Bringing the stack up
+# under a different project than the one that created it silently binds
+# postgres to a NEW EMPTY volume, so read it off the live container rather
+# than assuming it matches the directory the compose file now lives in.
+LIVE_PROJECT=$(docker inspect "$(docker ps -q --filter "label=com.docker.compose.service=minio" | head -1)" \
+  -f '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+LIVE_PROJECT="${LIVE_PROJECT:-<run: docker inspect <live-minio> -f '{{index .Config.Labels \"com.docker.compose.project\"}}'>}"
+
 log "DONE. Next steps (runbook 'Cutover order'):"
 log "  1. If the backend was running during this pass: stop it and re-run this script for the final delta."
-log "  2. Switch the DB stack to the RustFS compose block:"
-log "       docker compose -f docker-compose.<env>-db.yml up -d minio"
+log "  2. Switch the DB stack to the RustFS compose block — REUSE the live compose"
+log "     project name or postgres will come up on a new empty volume:"
+log "       docker compose -p $LIVE_PROJECT -f docker-compose.<env>-db.yml up -d minio"
 log "     (the old MinIO container is replaced; its volume is untouched = rollback)"
 log "  3. Start the backend; run: docker exec <backend> python -m app.scripts.storage_compat_check  (expect 14/14 PASS)"
 log "  4. Spot-check upload → preview → roster download; watch logs for S3Error for the first hour."
