@@ -1,6 +1,0 @@
-*.png
-*.json
-!package.json
-auth-*.json
-shot-*.png
-session-*.png
