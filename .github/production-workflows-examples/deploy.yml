@@ -321,7 +321,9 @@ jobs:
       - name: Smoke tests
         run: |
           curl -fsk "https://localhost/health" -H "Host: ${DOMAIN}" >/dev/null || exit 1
-          curl -fsk "https://localhost/api/v1/docs" -H "Host: ${DOMAIN}" >/dev/null || exit 1
+          # /api/v1/docs is intentionally disabled when ENVIRONMENT=production
+          # (backend/app/main.py) — smoke-test a real mounted API route instead.
+          curl -fsk "https://localhost/api/v1/scholarships" -H "Host: ${DOMAIN}" >/dev/null || exit 1
           # Frontend through nginx
           code=$(curl -sk -o /dev/null -w '%{http_code}' "https://localhost/" -H "Host: ${DOMAIN}")
           [ "$code" = "200" ] || { echo "::error::Frontend returned $code"; exit 1; }
