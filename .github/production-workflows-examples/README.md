@@ -145,10 +145,22 @@ cp /path/to/development-repo/.github/production-workflows-examples/backup.yml \
 > production AP VM 上的 self-hosted runner（labels `[self-hosted, linux]`），
 > 直接操作本機 docker 與 DB VM 的 5432 埠。GitHub-hosted runner 連不到校內 VM。
 
+#### Repository Variables（Settings → Variables → Actions）
+
+| Variable | 必填 | 說明 |
+|----------|------|------|
+| `IMAGE_OWNER` | ✅ | 發布映像檔的 GHCR namespace，也就是**開發 repo 的 owner**（例：`anud18`）。production repo 不建置映像檔，只取用開發流程已經發布、staging 驗過的那一份。 |
+| `PRODUCTION_URL` | ✅ | 例：`https://ss.aa.nycu.edu.tw` |
+| `ENV_FILE` | — | AP VM 上既有 `.env` 的絕對路徑（安裝手冊 5.1，例：`/home/<user>/.env`）。**設了就用它**，GitHub 完全不存這些值。留空則由 deploy.yml 依下方 secrets 產生 `~/scholarship-production/.env`（權限 600）。 |
+| `SSL_CERT_DIR` | — | TLS 憑證資料夾的絕對路徑（例：`/home/<user>/ssl`）。留空則用 repo `nginx/ssl/prod`。兩種 `ENV_FILE` 模式下都以這個變數優先。資料夾內需有 `fullchain.pem`、`privkey.pem`、`chain.pem`。 |
+
 #### 部署相關 (deploy.yml)
 
-映像檔推送到 GHCR，使用內建的 `GITHUB_TOKEN`，不需要 Docker Hub 帳密。
-完整清單見 `deploy.yml` 的 `validate-secrets` job 與 `deploy` job 的 `env:` 區塊：
+**設了 `ENV_FILE` 就不需要下面這些 secrets** — 值放在 AP VM 的 `.env` 裡，
+deploy 時會直接驗證該檔案（缺 key、`portal.test`、`ss-test`、`測試` 等都會擋下）。
+
+留空 `ENV_FILE` 時才需要設定以下 secrets（會被寫成 AP VM 上的 `.env`）。
+另外若上游 packages 是 private，需要 `GH_PAT`（`read:packages`）才能 pull：
 
 | Secret Name | Description | Example |
 |-------------|-------------|---------|
@@ -166,7 +178,15 @@ cp /path/to/development-repo/.github/production-workflows-examples/backup.yml \
 | `STUDENT_API_BASE_URL` | 學籍 API（不可是 localhost/mock） | `http://<ip>/api/SoAA` |
 | `SUPER_ADMIN_NYCU_ID` | 可升級為 super_admin 的職編 | `E00001` |
 
-另需 repository variable `PRODUCTION_URL`（例：`https://ss.aa.nycu.edu.tw`）。
+### Container Registry / 映像檔來源
+
+production repo **不建置也不推送映像檔**。開發 repo 的 pipeline 建好推到 GHCR，
+production 只是把同一份 artifact 拉下來跑，確保上線的東西跟 staging 驗過的是
+同一個 image，而不是從 mirror 過來的原始碼重新 build 出的另一份。
+
+部署指定版本：`Deploy to Production` → Run workflow → 填 `tag`
+（例：`main-2c2b89d6` 或 `v1.2.3`）。不填預設 `latest`；`latest` 會浮動，
+無法回滾，正式上線請指定明確 tag。
 
 #### 環境建置相關 (setting-env.yml)
 
