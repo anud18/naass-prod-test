@@ -122,9 +122,28 @@ prometheus.exporter.blackbox "storage" {
 
 prometheus.scrape "storage" {
   targets    = prometheus.exporter.blackbox.storage.targets
-  forward_to = [prometheus.relabel.add_labels.receiver]
+  forward_to = [prometheus.relabel.storage_identity.receiver]
   job_name   = "storage"
   scrape_interval = "15s"
+}
+
+// prometheus.exporter.blackbox stamps its own job/instance onto every target
+// it emits (job="integrations/blackbox/<target name>", instance=<alloy
+// container id>), and those WIN over prometheus.scrape's job_name. Without
+// this rewrite the series arrive as
+// probe_success{job="integrations/blackbox/storage_health"} and the
+// StorageDown alert — which matches job="storage" — silently never fires.
+// Verified against live staging 2026-07-26.
+prometheus.relabel "storage_identity" {
+  forward_to = [prometheus.relabel.add_labels.receiver]
+  rule {
+    target_label = "job"
+    replacement  = "storage"
+  }
+  rule {
+    target_label = "instance"
+    replacement  = "minio:9000"
+  }
 }
 
 prometheus.relabel "add_labels" {
