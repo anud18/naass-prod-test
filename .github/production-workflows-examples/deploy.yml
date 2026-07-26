@@ -155,6 +155,14 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./backend
+          # backend/Dockerfile pulls the React Email templates via
+          # `COPY --from=frontend_emails . /frontend/emails`, so the named
+          # BuildKit context has to be supplied here — without it the build
+          # resolves `frontend_emails` as docker.io/library/frontend_emails
+          # and dies with "pull access denied". Same wiring as the dev repo's
+          # deploy-pipeline.yml and release.yml.
+          build-contexts: |
+            frontend_emails=./frontend/emails
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/scholarship-system-backend:${{ steps.version.outputs.version }}
