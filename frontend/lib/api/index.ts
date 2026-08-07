@@ -24,6 +24,7 @@ import { createProfessorApi } from './modules/professor';
 import { createCollegeApi } from './modules/college';
 import { createWhitelistApi } from './modules/whitelist';
 import { createSystemSettingsApi } from './modules/system-settings';
+import { createFooterLinksApi } from './modules/footer-links';
 import { createBankVerificationApi } from './modules/bank-verification';
 import { createProfessorStudentApi } from './modules/professor-student';
 import { createEmailAutomationApi } from './modules/email-automation';
@@ -42,6 +43,7 @@ import { createStudentsApi } from './modules/students';
 import { createManualDistributionApi } from './modules/manual-distribution';
 import { createRenewalApi } from './modules/renewal';
 import { createStudentHistoryApi } from './modules/student-history';
+import { createReceivedMonthsApi } from './modules/received-months';
 // import { createReviewApi } from './modules/reviews'; // Not used - professor reviews use professor endpoints with adapter
 
 // Re-export ALL types from modular types file
@@ -153,6 +155,7 @@ class ExtendedApiClient extends ApiClient {
   private _college?: ReturnType<typeof createCollegeApi>;
   private _whitelist?: ReturnType<typeof createWhitelistApi>;
   private _systemSettings?: ReturnType<typeof createSystemSettingsApi>;
+  private _footerLinks?: ReturnType<typeof createFooterLinksApi>;
   private _bankVerification?: ReturnType<typeof createBankVerificationApi>;
   private _professorStudent?: ReturnType<typeof createProfessorStudentApi>;
   private _emailAutomation?: ReturnType<typeof createEmailAutomationApi>;
@@ -171,6 +174,7 @@ class ExtendedApiClient extends ApiClient {
   private _manualDistribution?: ReturnType<typeof createManualDistributionApi>;
   private _renewal?: ReturnType<typeof createRenewalApi>;
   private _studentHistory?: ReturnType<typeof createStudentHistoryApi>;
+  private _receivedMonths?: ReturnType<typeof createReceivedMonthsApi>;
 
   // Lazy-loaded getters
   get auth(): ReturnType<typeof createAuthApi> {
@@ -221,6 +225,11 @@ class ExtendedApiClient extends ApiClient {
   get systemSettings(): ReturnType<typeof createSystemSettingsApi> {
     if (!this._systemSettings) this._systemSettings = createSystemSettingsApi();
     return this._systemSettings;
+  }
+
+  get footerLinks(): ReturnType<typeof createFooterLinksApi> {
+    if (!this._footerLinks) this._footerLinks = createFooterLinksApi();
+    return this._footerLinks;
   }
 
   get bankVerification(): ReturnType<typeof createBankVerificationApi> {
@@ -311,6 +320,11 @@ class ExtendedApiClient extends ApiClient {
   get studentHistory(): ReturnType<typeof createStudentHistoryApi> {
     if (!this._studentHistory) this._studentHistory = createStudentHistoryApi();
     return this._studentHistory;
+  }
+
+  get receivedMonths(): ReturnType<typeof createReceivedMonthsApi> {
+    if (!this._receivedMonths) this._receivedMonths = createReceivedMonthsApi();
+    return this._receivedMonths;
   }
 
   // Backward compatibility alias
