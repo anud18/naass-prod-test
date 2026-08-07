@@ -160,6 +160,12 @@ class Application(Base):
     suspended_at = Column(DateTime(timezone=True), nullable=True)
     suspended_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     suspend_reason = Column(Text, nullable=True)
+    # 撤銷/停發當下的狀態快照。撤銷/停發可以在「確認分發」之前執行（學生休學/
+    # 退學讓他必須被排除於本次分發），此時把申請恢復成 approved/allocated 是錯的
+    # ——復原必須把 status / quota_allocation_status 放回取消前的值。
+    # NULL = 尚未被撤銷/停發（或已復原）。
+    cancelled_from_status = Column(String(30), nullable=True)
+    cancelled_from_quota_status = Column(String(20), nullable=True)
 
     # 時間戳記
     submitted_at = Column(DateTime(timezone=True))
@@ -176,7 +182,9 @@ class Application(Base):
     # 批次匯入相關 (Batch Import)
     imported_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # 匯入者
     batch_import_id = Column(Integer, ForeignKey("batch_imports.id"), nullable=True)  # 批次匯入紀錄
-    import_source = Column(String(20), nullable=True, default="online")  # 'online' | 'batch_import'
+    # 'online' | 'batch_import' | 'renewal_import' | 'supplementary_import'
+    # NOTE: 'supplementary_import' is exactly 20 chars — String(20) has no headroom left.
+    import_source = Column(String(20), nullable=True, default="online")
     document_status = Column(String(30), nullable=True, default="complete")  # 'complete' | 'pending_documents'
 
     # 其他資訊
