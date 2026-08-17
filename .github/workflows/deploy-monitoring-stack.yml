@@ -503,7 +503,10 @@ jobs:
         run: |
           set -euo pipefail
           AUTH_HDR="Authorization: Basic $(printf '%s' "${ADMIN_USER}:${ADMIN_PASS}" | base64 -w0)"
-          gf() { docker exec monitoring_grafana wget -qO- --header "$AUTH_HDR" "http://localhost:3000$1"; }
+          # `|| true`: wget exits non-zero AND prints nothing on a 4xx, and a
+          # datasource health endpoint answering 400 is a result to report, not
+          # a reason to abort the step under `set -e`.
+          gf() { docker exec monitoring_grafana wget -qO- --header "$AUTH_HDR" "http://localhost:3000$1" 2>/dev/null || true; }
 
           # 1. Container liveness. webhook-bridge is intentionally not in this
           #    list: it is only in the alert delivery path, and a build/runtime
@@ -522,11 +525,54 @@ jobs:
           #    Grafana is up — a datasource pointing at a dead URL fails
           #    silently, one panel at a time, which is exactly the failure this
           #    whole stack exists to prevent.
+          #
+          #    Only the datasources THIS stage reads are gating. The shared
+          #    provisioning ships one Loki datasource per tenant (prod, staging,
+          #    dev) because one Grafana used to serve several environments; on a
+          #    per-stage VM the other tenants are empty by design and must not
+          #    be able to fail the deploy.
+          REQUIRED_DS="prometheus-uid loki-prod-uid"
+          ds_fail=0
           for uid in $(gf /api/datasources | jq -r '.[].uid'); do
-            STATUS=$(gf "/api/datasources/uid/${uid}/health" | jq -r '.status // "missing"')
-            [ "$STATUS" = "OK" ] || { echo "::error::Datasource ${uid} is not OK (status=${STATUS})"; exit 1; }
-            echo "  ✅ datasource ${uid}"
+            STATUS=$(gf "/api/datasources/uid/${uid}/health" | jq -r '.status // "unreachable"')
+            case " ${REQUIRED_DS} " in
+              *" ${uid} "*)
+                if [ "$STATUS" = "OK" ]; then
+                  echo "  ✅ datasource ${uid}"
+                else
+                  echo "::error::Datasource ${uid} is not OK (status=${STATUS})"
+                  ds_fail=1
+                fi
+                ;;
+              *)
+                [ "$STATUS" = "OK" ] && echo "  ✅ datasource ${uid} (not gating)" \
+                  || echo "::warning::Datasource ${uid} is ${STATUS} — not gating on this stage."
+                ;;
+            esac
           done
+
+          if [ "$ds_fail" -ne 0 ]; then
+            # Grafana answers a broken datasource with a generic "Unable to
+            # connect"; the actual reason is only in its own log.
+            echo "Grafana's own diagnosis:"
+            docker logs monitoring_grafana 2>&1 | grep -E 'logger=tsdb.*level=error' | tail -5
+            # The failure mode that costs the most time to identify. Grafana
+            # encrypts secureJsonData (here: the X-Scope-OrgID tenant header)
+            # with GF_SECURITY_SECRET_KEY. Setting or changing that secret
+            # against a volume encrypted under a DIFFERENT key — including
+            # Grafana's built-in default, which is what a stack started without
+            # the secret uses — decrypts every stored secret to garbage.
+            # Provisioning does not repair it: the datasource already exists, so
+            # its secure fields are never rewritten. Observed on the test AP VM,
+            # where it surfaced only as "Unable to connect with Loki".
+            if docker logs monitoring_grafana 2>&1 | grep -q 'invalid header field value'; then
+              echo "::error::'invalid header field value' means the stored tenant header cannot be decrypted:"
+              echo "::error::GRAFANA_SECRET_KEY does not match the key this grafana_data volume was encrypted with."
+              echo "::error::Either restore the previous key (a stack started WITHOUT the secret used Grafana's default),"
+              echo "::error::or re-run this workflow with reset_grafana_volume=true to rebuild the volume from provisioning."
+            fi
+            exit 1
+          fi
 
           # 3. Provisioned dashboards and alert rules. The expected counts are
           #    derived from the files that were just copied, not hardcoded, so
